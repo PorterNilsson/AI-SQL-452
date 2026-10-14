@@ -1,157 +1,158 @@
+"""Batch natural-language-to-SQL experiment for the blood-bank database."""
+
 import json
-from openai import OpenAI
 import os
+import re
 import sqlite3
-from time import time
+from datetime import datetime
+from pathlib import Path
 
-print("Running db_bot.py!")
+PROJECT_DIR = Path(__file__).resolve().parent
+DATABASE_PATH = PROJECT_DIR / "aidb.sqlite"
+SCHEMA_PATH = PROJECT_DIR / "setup.sql"
+DATA_PATH = PROJECT_DIR / "setupData.sql"
+MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
 
-fdir = os.path.dirname(__file__)
-def getPath(fname):
-    return os.path.join(fdir, fname)
 
-# SQLITE
-sqliteDbPath = getPath("aidb.sqlite")
-setupSqlPath = getPath("setup.sql")
-setupSqlDataPath = getPath("setupData.sql")
+def read_prompt_context() -> str:
+    return SCHEMA_PATH.read_text(encoding="utf-8")
 
-# Erase previous db
-if os.path.exists(sqliteDbPath):
-    os.remove(sqliteDbPath)
 
-# create new db
-sqliteCon = sqlite3.connect(sqliteDbPath) 
-sqliteCursor = sqliteCon.cursor()
+def create_database() -> sqlite3.Connection:
+    """Rebuild the local database from the checked-in schema and seed data."""
+    if DATABASE_PATH.exists():
+        DATABASE_PATH.unlink()
 
-# read in setup files
-with (
-        open(setupSqlPath) as setupSqlFile,
-        open(setupSqlDataPath) as setupSqlDataFile
-    ):
+    connection = sqlite3.connect(DATABASE_PATH)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    connection.executescript(DATA_PATH.read_text(encoding="utf-8"))
+    # The generated SQL is for answering questions only; prevent data changes.
+    connection.execute("PRAGMA query_only = ON")
+    return connection
 
-    setupSqlScript = setupSqlFile.read()
-    setupSQlDataScript = setupSqlDataFile.read()
 
-# execute setup files
-sqliteCursor.executescript(setupSqlScript) # setup tables and keys
-sqliteCursor.executescript(setupSQlDataScript) # setup tables and keys
+def run_sql(connection: sqlite3.Connection, query: str) -> list[dict]:
+    """Execute one read-only SELECT and return rows with their column names."""
+    sql = query.strip()
+    if sql.endswith(";"):
+        sql = sql[:-1].rstrip()
+    if not re.match(r"^(SELECT|WITH)\b", sql, re.IGNORECASE):
+        raise ValueError("Only read-only SELECT queries are allowed.")
+    if ";" in sql:
+        raise ValueError("Only one SQL statement is allowed per question.")
+    cursor = connection.execute(sql)
+    return [dict(row) for row in cursor.fetchall()]
 
-def runSql(query):
-    result = sqliteCursor.execute(query).fetchall()
-    return result
 
-# OPENAI
-configPath = getPath("config.json")
-print(configPath)
-with open(configPath) as configFile:
-    config = json.load(configFile)
-
-openAiClient = OpenAI(api_key = config["openaiKey"])
-openAiClient.models.list() # check if the key is valid (update in config.json)
-chosen_model = "gpt-4o"
-
-def getChatGptResponse(content):
-    stream = openAiClient.chat.completions.create(
-        model=chosen_model,
-        messages=[{"role": "user", "content": content}],
-        stream=True,
+def get_chat_response(client, prompt: str) -> str:
+    response = client.chat.completions.create(
+        model=MODEL,
+        messages=[{"role": "user", "content": prompt}],
     )
-
-    responseList = []
-    for chunk in stream:
-        if chunk.choices[0].delta.content is not None:
-            responseList.append(chunk.choices[0].delta.content)
-
-    result = "".join(responseList)
-    return result
+    return (response.choices[0].message.content or "").strip()
 
 
-# strategies
-commonSqlOnlyRequest = " Give me a sqlite select statement that answers the question. Only respond with sqlite syntax. If there is an error do not explain it!"
-strategies = {
-    "zero_shot": setupSqlScript + commonSqlOnlyRequest,
-    "single_domain_double_shot": (setupSqlScript +
-                   " Who doesn't have a way for us to text them? " +
-                   " \nSELECT p.person_id, p.name\nFROM person p\nLEFT JOIN phone ph ON p.person_id = ph.person_id AND ph.can_recieve_sms = 1\nWHERE ph.phone_id IS NULL;\n " +
-                   commonSqlOnlyRequest)
-     # TODO add strategies as descirbed in the paper (multi-domain)              
-}
-
-questions = [
-    "Which are the most awarded dogs?",
-    # "Which dogs have multiple owners?",
-    # "Which people have multiple dogs?",
-    # "What are the top 3 cities represented?",
-    # "What are the names and cities of the dogs who have awards?",
-    # "Who has more than one phone number?",
-    "Who doesn't have a way for us to text them?",
-    "Will we have a problem texting any of the previous award winners?"
-    # "I need insert sql into my tables can you provide good unique data?"
-]
+def sanitize_sql(response: str) -> str:
+    """Remove an optional Markdown SQL fence from a generated query."""
+    match = re.search(r"```(?:sql|sqlite)?\s*(.*?)```", response, re.IGNORECASE | re.DOTALL)
+    return (match.group(1) if match else response).strip()
 
 
-# use the markdown for the sql syntax to find the SQL query
-def sanitizeForJustSql(value):
-    gptStartSqlMarker = "```"
-    gptEndSqlMarker = "```"
-    if gptStartSqlMarker in value:
-        # Split at the first ``` and take everything after it
-        value = value.split(gptStartSqlMarker, 1)[1]
-        # Find the newline after the language identifier (sql, sqlite, etc.)
-        newline_index = value.find("\n")
-        if newline_index != -1:
-            value = value[newline_index + 1:]
-    if gptEndSqlMarker in value:
-        # Split at the closing ``` and take everything before it
-        value = value.split(gptEndSqlMarker, 1)[0]
-
-    return value.strip()
-
-for strategy in strategies:
-    responses = {"strategy": strategy, "prompt_prefix": strategies[strategy]}
-    questionResults = []
-    print("########################################################################")
-    print(f"Running strategy: {strategy}")
-    for question in questions:
-
-        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-        print("Question:")
-        print(question)
-        error = "None"
-        try:
-            getSqlFromQuestionEngineeredPrompt = strategies[strategy] + " " + question
-            sqlSyntaxResponse = getChatGptResponse(getSqlFromQuestionEngineeredPrompt)
-            sqlSyntaxResponse = sanitizeForJustSql(sqlSyntaxResponse)
-            print("SQL Syntax Response:")
-            print(sqlSyntaxResponse)
-            queryRawResponse = str(runSql(sqlSyntaxResponse))
-            print("Query Raw Response:")
-            print(queryRawResponse)
-
-            # TODO this prompt is insufficient. ChatGPT doesn't have all the context that it needs.
-            # What context would help the friendly response be more successful? Can you fix it?
-            friendlyResultsPrompt = "I asked a question \"" + question +"\" and the response was \""+queryRawResponse+"\" Please, just give a concise response in a more friendly way? Please do not give any other suggests or chatter."
-            friendlyResponse = getChatGptResponse(friendlyResultsPrompt)
-            print("Friendly Response:")
-            print(friendlyResponse)
-        except Exception as err:
-            error = str(err)
-            print(err)
-
-        questionResults.append({
-            "question": question,
-            "sql": sqlSyntaxResponse,
-            "queryRawResponse": queryRawResponse,
-            "friendlyResponse": friendlyResponse,
-            "error": error
-        })
-
-    responses["questionResults"] = questionResults
-
-    with open(getPath(f"response_{strategy}_{time()}.json"), "w") as outFile:
-        json.dump(responses, outFile, indent = 2)
+def make_strategies(schema: str) -> dict[str, str]:
+    instructions = (
+        "Generate one SQLite SELECT statement that answers the question. "
+        "Use only tables and columns in the schema. Return SQL only, without "
+        "Markdown fences or explanation. Do not modify data.\n\n"
+    )
+    zero_shot = "Database schema:\n" + schema + "\n\n" + instructions
+    single_domain_example = (
+        "Example question: Which donors have given more than one donation?\n"
+        "Example SQL:\n"
+        "SELECT p.first_name, p.last_name, COUNT(d.id) AS donation_count\n"
+        "FROM donor AS dr\n"
+        "JOIN person AS p ON p.id = dr.person_id\n"
+        "JOIN donations AS d ON d.donor_id = dr.id\n"
+        "GROUP BY dr.id, p.first_name, p.last_name\n"
+        "HAVING COUNT(d.id) > 1;\n\n"
+    )
+    single_domain = (
+        "Database schema:\n" + schema + "\n\n" + single_domain_example + instructions
+    )
+    return {"zero_shot": zero_shot, "single_domain": single_domain}
 
 
-sqliteCursor.close()
-sqliteCon.close()
-print("Done!")
+def main() -> None:
+    api_key = os.environ.get("OPENAPI_KEY")
+    if not api_key:
+        raise SystemExit(
+            "OPENAPI_KEY is not set. Add your key to the ignored .env file, then run `make run`."
+        )
+
+    from openai import OpenAI
+
+    client = OpenAI(api_key=api_key)
+    schema = read_prompt_context()
+    strategies = make_strategies(schema)
+    questions = [
+        "How many donors are registered for each blood type?",
+        "Which donors have given more than one donation?",
+        "How many donations were made at each location?",
+        "Which donors have a medical condition recorded?",
+        "Which staff members work at the Provo location?",
+        "What is the total amount donated by each donor?",
+        "Which donors have not made a donation?",
+        "What was the most recent donation date?",
+    ]
+
+    connection = create_database()
+    try:
+        for strategy_name, prompt_prefix in strategies.items():
+            results = {"strategy": strategy_name, "questionResults": []}
+            print("#" * 72)
+            print(f"Prompting strategy: {strategy_name}")
+
+            for question in questions:
+                print("\n" + "~" * 72)
+                print(f"Question: {question}")
+                result = {
+                    "question": question,
+                    "sql": "",
+                    "queryRawResponse": "",
+                    "friendlyResponse": "",
+                    "error": None,
+                }
+                try:
+                    result["sql"] = sanitize_sql(
+                        get_chat_response(client, prompt_prefix + "Question: " + question)
+                    )
+                    print(f"Generated SQL:\n{result['sql']}")
+                    rows = run_sql(connection, result["sql"])
+                    result["queryRawResponse"] = rows
+                    print(f"Rows: {json.dumps(rows, ensure_ascii=False)}")
+
+                    answer_prompt = (
+                        "Answer the user's question using only the database result below. "
+                        "Give a concise, friendly answer. If the result is empty, say that "
+                        "no matching records were found. Do not invent facts.\n\n"
+                        f"Question: {question}\n"
+                        f"Result columns and rows: {json.dumps(rows, ensure_ascii=False)}"
+                    )
+                    result["friendlyResponse"] = get_chat_response(client, answer_prompt)
+                    print(f"Friendly answer: {result['friendlyResponse']}")
+                except Exception as error:  # Keep a failed experiment in the report.
+                    result["error"] = str(error)
+                    print(f"Error: {error}")
+                results["questionResults"].append(result)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = PROJECT_DIR / f"response_{strategy_name}_{timestamp}.json"
+            output_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
+            print(f"Saved results to {output_path.name}")
+    finally:
+        connection.close()
+
+
+if __name__ == "__main__":
+    main()

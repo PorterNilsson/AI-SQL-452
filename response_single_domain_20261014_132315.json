@@ -1,0 +1,223 @@
+{
+  "strategy": "single_domain",
+  "questionResults": [
+    {
+      "question": "How many donors are registered for each blood type?",
+      "sql": "SELECT blood_type, COUNT(id) AS donor_count\nFROM donor\nGROUP BY blood_type;",
+      "queryRawResponse": [
+        {
+          "blood_type": "A",
+          "donor_count": 4
+        },
+        {
+          "blood_type": "AB",
+          "donor_count": 3
+        },
+        {
+          "blood_type": "B",
+          "donor_count": 4
+        },
+        {
+          "blood_type": "O",
+          "donor_count": 5
+        }
+      ],
+      "friendlyResponse": "Here are the numbers of registered donors for each blood type:\n\n- Blood type A: 4 donors\n- Blood type AB: 3 donors\n- Blood type B: 4 donors\n- Blood type O: 5 donors\n\nIf you need anything else, feel free to ask!",
+      "error": null
+    },
+    {
+      "question": "Which donors have given more than one donation?",
+      "sql": "SELECT p.first_name, p.last_name, COUNT(d.id) AS donation_count\nFROM donor AS dr\nJOIN person AS p ON p.id = dr.person_id\nJOIN donations AS d ON d.donor_id = dr.id\nGROUP BY dr.id, p.first_name, p.last_name\nHAVING COUNT(d.id) > 1;",
+      "queryRawResponse": [
+        {
+          "first_name": "Avery",
+          "last_name": "Johnson",
+          "donation_count": 3
+        },
+        {
+          "first_name": "Noah",
+          "last_name": "Williams",
+          "donation_count": 2
+        },
+        {
+          "first_name": "Liam",
+          "last_name": "Wilson",
+          "donation_count": 2
+        }
+      ],
+      "friendlyResponse": "The donors who have given more than one donation are Avery Johnson, Noah Williams, and Liam Wilson.",
+      "error": null
+    },
+    {
+      "question": "How many donations were made at each location?",
+      "sql": "SELECT l.id AS location_id, COUNT(d.id) AS donation_count\nFROM locations AS l\nJOIN donations AS d ON d.location_id = l.id\nGROUP BY l.id;",
+      "queryRawResponse": [
+        {
+          "location_id": 1,
+          "donation_count": 6
+        },
+        {
+          "location_id": 2,
+          "donation_count": 5
+        },
+        {
+          "location_id": 3,
+          "donation_count": 4
+        },
+        {
+          "location_id": 4,
+          "donation_count": 3
+        }
+      ],
+      "friendlyResponse": "Here are the donation counts for each location:\n\n- Location 1: 6 donations\n- Location 2: 5 donations\n- Location 3: 4 donations\n- Location 4: 3 donations",
+      "error": null
+    },
+    {
+      "question": "Which donors have a medical condition recorded?",
+      "sql": "SELECT p.first_name, p.last_name\nFROM donor AS dr\nJOIN person AS p ON p.id = dr.person_id\nJOIN medical_conditions AS mc ON mc.donor_id = dr.id;",
+      "queryRawResponse": [
+        {
+          "first_name": "Isabella",
+          "last_name": "Davis"
+        },
+        {
+          "first_name": "Amara",
+          "last_name": "Patel"
+        },
+        {
+          "first_name": "Nina",
+          "last_name": "Roberts"
+        },
+        {
+          "first_name": "Mateo",
+          "last_name": "Rivera"
+        }
+      ],
+      "friendlyResponse": "Here are the donors who have a medical condition recorded:\n\n1. Isabella Davis\n2. Amara Patel\n3. Nina Roberts\n4. Mateo Rivera",
+      "error": null
+    },
+    {
+      "question": "Which staff members work at the Provo location?",
+      "sql": "SELECT p.first_name, p.last_name, s.role\nFROM staff AS s\nJOIN person AS p ON p.id = s.person_id\nJOIN staff_to_location AS stl ON stl.staff_id = s.id\nJOIN locations AS l ON l.id = stl.location_id\nJOIN address AS a ON a.id = l.address_id\nWHERE a.city = 'Provo';",
+      "queryRawResponse": [
+        {
+          "first_name": "Maya",
+          "last_name": "Chen",
+          "role": "Nurse"
+        },
+        {
+          "first_name": "Ethan",
+          "last_name": "Brooks",
+          "role": "Coordinator"
+        }
+      ],
+      "friendlyResponse": "The staff members working at the Provo location are Maya Chen, who is a Nurse, and Ethan Brooks, who is a Coordinator.",
+      "error": null
+    },
+    {
+      "question": "What is the total amount donated by each donor?",
+      "sql": "SELECT p.first_name, p.last_name, SUM(d.amount) AS total_donated\nFROM donor AS dr\nJOIN person AS p ON p.id = dr.person_id\nJOIN donations AS d ON d.donor_id = dr.id\nGROUP BY dr.id, p.first_name, p.last_name;",
+      "queryRawResponse": [
+        {
+          "first_name": "Avery",
+          "last_name": "Johnson",
+          "total_donated": 1440
+        },
+        {
+          "first_name": "Noah",
+          "last_name": "Williams",
+          "total_donated": 900
+        },
+        {
+          "first_name": "Isabella",
+          "last_name": "Davis",
+          "total_donated": 500
+        },
+        {
+          "first_name": "Liam",
+          "last_name": "Wilson",
+          "total_donated": 940
+        },
+        {
+          "first_name": "Amara",
+          "last_name": "Patel",
+          "total_donated": 480
+        },
+        {
+          "first_name": "Lucas",
+          "last_name": "Garcia",
+          "total_donated": 450
+        },
+        {
+          "first_name": "Zoe",
+          "last_name": "Thompson",
+          "total_donated": 500
+        },
+        {
+          "first_name": "Caleb",
+          "last_name": "Anderson",
+          "total_donated": 460
+        },
+        {
+          "first_name": "Nina",
+          "last_name": "Roberts",
+          "total_donated": 480
+        },
+        {
+          "first_name": "Owen",
+          "last_name": "Kim",
+          "total_donated": 470
+        },
+        {
+          "first_name": "Leila",
+          "last_name": "Hassan",
+          "total_donated": 500
+        },
+        {
+          "first_name": "Mateo",
+          "last_name": "Rivera",
+          "total_donated": 460
+        },
+        {
+          "first_name": "Grace",
+          "last_name": "Bennett",
+          "total_donated": 470
+        },
+        {
+          "first_name": "Henry",
+          "last_name": "Clark",
+          "total_donated": 450
+        }
+      ],
+      "friendlyResponse": "Here's the total amount donated by each donor:\n\n- Avery Johnson: $1,440\n- Noah Williams: $900\n- Isabella Davis: $500\n- Liam Wilson: $940\n- Amara Patel: $480\n- Lucas Garcia: $450\n- Zoe Thompson: $500\n- Caleb Anderson: $460\n- Nina Roberts: $480\n- Owen Kim: $470\n- Leila Hassan: $500\n- Mateo Rivera: $460\n- Grace Bennett: $470\n- Henry Clark: $450\n\nThese contributions are much appreciated!",
+      "error": null
+    },
+    {
+      "question": "Which donors have not made a donation?",
+      "sql": "SELECT p.first_name, p.last_name\nFROM donor AS dr\nJOIN person AS p ON p.id = dr.person_id\nLEFT JOIN donations AS d ON d.donor_id = dr.id\nWHERE d.id IS NULL;",
+      "queryRawResponse": [
+        {
+          "first_name": "Priya",
+          "last_name": "Shah"
+        },
+        {
+          "first_name": "Jack",
+          "last_name": "Foster"
+        }
+      ],
+      "friendlyResponse": "The donors who have not made a donation are Priya Shah and Jack Foster.",
+      "error": null
+    },
+    {
+      "question": "What was the most recent donation date?",
+      "sql": "SELECT MAX(date) AS most_recent_donation_date FROM donations;",
+      "queryRawResponse": [
+        {
+          "most_recent_donation_date": "2026-08-07 09:05:00"
+        }
+      ],
+      "friendlyResponse": "The most recent donation date was on August 7, 2026.",
+      "error": null
+    }
+  ]
+}

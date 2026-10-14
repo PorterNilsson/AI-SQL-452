@@ -1,48 +1,79 @@
-create table person (
-    person_id integer primary key,
-    name varchar(20) not null
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE address (
+    id INTEGER PRIMARY KEY,
+    street TEXT NOT NULL,
+    city TEXT NOT NULL,
+    state TEXT NOT NULL,
+    zip TEXT NOT NULL
 );
 
-create table phone (
-    phone_id integer primary key,
-    person_id integer not null,
-    area_code int not null,
-    number int not null,
-    can_recieve_sms tinyint not null,
-    foreign key (person_id) references person (person_id)
+CREATE TABLE person (
+    id INTEGER PRIMARY KEY,
+    first_name TEXT NOT NULL,
+    last_name TEXT NOT NULL,
+    phone_number TEXT NOT NULL,
+    age INTEGER NOT NULL CHECK (age BETWEEN 18 AND 120),
+    gender TEXT NOT NULL CHECK (gender IN ('Female', 'Male', 'Nonbinary', 'Prefer not to say')),
+    address_id INTEGER NOT NULL UNIQUE,
+    FOREIGN KEY (address_id) REFERENCES address(id)
 );
 
-create table address (
-    address_id integer primary key,
-    person_id integer not null,
-    street varchar(50),
-    zip integer not null
+CREATE TABLE staff (
+    id INTEGER PRIMARY KEY,
+    person_id INTEGER NOT NULL UNIQUE,
+    role TEXT NOT NULL CHECK (role IN ('Nurse', 'Coordinator', 'Technician', 'Administrator')),
+    hire_date TEXT NOT NULL,
+    FOREIGN KEY (person_id) REFERENCES person(id)
 );
 
-create table zip (
-    zip integer primary key,
-    city varchar(35),
-    state_two_letter_code char(2)
+CREATE TABLE donor (
+    id INTEGER PRIMARY KEY,
+    person_id INTEGER NOT NULL UNIQUE,
+    blood_type TEXT NOT NULL CHECK (blood_type IN ('A', 'B', 'AB', 'O')),
+    rh_factor INTEGER NOT NULL CHECK (rh_factor IN (0, 1)),
+    FOREIGN KEY (person_id) REFERENCES person(id)
 );
 
-create table dog (
-    dog_id integer primary key,
-    name varchar(35),
-    breed varchar(35),
-    birth_date date
+CREATE TABLE medications (
+    donor_id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    FOREIGN KEY (donor_id) REFERENCES donor(id)
 );
 
-create table award (
-    award_id integer primary key,
-    dog_id integer not null,
-    event_date date,
-    award_name varchar(25) not null,
-    foreign key (dog_id) references dog (dog_id)
+CREATE TABLE medical_conditions (
+    donor_id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    severity TEXT NOT NULL CHECK (severity IN ('Mild', 'Moderate', 'Severe')),
+    FOREIGN KEY (donor_id) REFERENCES donor(id)
 );
 
-create table person_dog (
-    dog_id integer,
-    person_id integer,
-    foreign key (dog_id) references dog (dog_id),
-    foreign key (person_id) references person (person_id)
+CREATE TABLE locations (
+    id INTEGER PRIMARY KEY,
+    address_id INTEGER NOT NULL UNIQUE,
+    FOREIGN KEY (address_id) REFERENCES address(id)
 );
+
+CREATE TABLE staff_to_location (
+    staff_id INTEGER NOT NULL,
+    location_id INTEGER NOT NULL,
+    PRIMARY KEY (staff_id, location_id),
+    FOREIGN KEY (staff_id) REFERENCES staff(id),
+    FOREIGN KEY (location_id) REFERENCES locations(id)
+);
+
+CREATE TABLE donations (
+    id INTEGER PRIMARY KEY,
+    donor_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
+    amount INTEGER NOT NULL CHECK (amount > 0),
+    location_id INTEGER NOT NULL,
+    notes TEXT,
+    FOREIGN KEY (donor_id) REFERENCES donor(id),
+    FOREIGN KEY (location_id) REFERENCES locations(id)
+);
+
+CREATE INDEX idx_donations_donor_id ON donations(donor_id);
+CREATE INDEX idx_donations_location_id ON donations(location_id);
+CREATE INDEX idx_donations_date ON donations(date);
